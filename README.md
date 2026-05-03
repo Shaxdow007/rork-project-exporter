@@ -38,22 +38,6 @@ Export your **Rork projects** directly from the browser into a ZIP file — no p
 5. Paste the script:
 
    ```js
-   /**
- * Rork Project Exporter - No Clipboard Version
- *
- * Exports visible Rork project files into a ZIP while keeping folder structure.
- *
- * Usage:
- * 1. Open your Rork project page.
- * 2. Make sure the left file tree is visible.
- * 3. Open DevTools > Console.
- * 4. Paste this script and press Enter.
- *
- * Note:
- * This script only exports files visible/readable in the browser UI.
- * Binary files may fail if Rork does not expose a preview.
- */
-
 (async () => {
   console.clear();
   console.log("Rork Project Exporter started");

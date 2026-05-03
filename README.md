@@ -38,7 +38,241 @@ Export your **Rork projects** directly from the browser into a ZIP file — no p
 5. Paste the script:
 
    ```js
-   // paste rork-exporter.js here
+   /**
+ * Rork Project Exporter - No Clipboard Version
+ *
+ * Exports visible Rork project files into a ZIP while keeping folder structure.
+ *
+ * Usage:
+ * 1. Open your Rork project page.
+ * 2. Make sure the left file tree is visible.
+ * 3. Open DevTools > Console.
+ * 4. Paste this script and press Enter.
+ *
+ * Note:
+ * This script only exports files visible/readable in the browser UI.
+ * Binary files may fail if Rork does not expose a preview.
+ */
+
+(async () => {
+  console.clear();
+  console.log("Rork Project Exporter started");
+
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  async function loadJSZip() {
+    if (window.JSZip) return;
+
+    const script = document.createElement("script");
+    script.src = "https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js";
+    document.head.appendChild(script);
+
+    await new Promise((resolve, reject) => {
+      script.onload = resolve;
+      script.onerror = reject;
+    });
+  }
+
+  function cleanPathName(name) {
+    return (name || "unknown")
+      .trim()
+      .replace(/[\\:*?"<>|]/g, "_");
+  }
+
+  async function expandAllFolders() {
+    while (true) {
+      const closedFolders = [
+        ...document.querySelectorAll(
+          'button[data-radix-collection-item][data-state="closed"]'
+        ),
+      ];
+
+      if (!closedFolders.length) break;
+
+      console.log("Expanding folders:", closedFolders.length);
+
+      for (const folder of closedFolders) {
+        folder.click();
+        await sleep(150);
+      }
+
+      await sleep(1000);
+    }
+  }
+
+  function isFileButton(button) {
+    return !!button.querySelector("svg.lucide-file");
+  }
+
+  function getItemName(button) {
+    return cleanPathName(
+      button.querySelector("p.truncate")?.textContent ||
+        button.querySelector("span.truncate")?.textContent ||
+        button.querySelector("p")?.textContent ||
+        button.querySelector("span")?.textContent
+    );
+  }
+
+  function getFolderPath(button) {
+    const parts = [];
+    let current = button;
+
+    while (current) {
+      const name = getItemName(current);
+      if (name) parts.unshift(name);
+
+      const region = current.closest('div[role="region"][id^="radix-"]');
+      if (!region) break;
+
+      current = document.querySelector(`button[aria-controls="${region.id}"]`);
+    }
+
+    if (isFileButton(button)) parts.pop();
+
+    return parts.join("/");
+  }
+
+  function readVisibleEditorText() {
+    const editor =
+      document.querySelector(".cm-content") ||
+      document.querySelector('div[role="textbox"]') ||
+      document.querySelector("pre") ||
+      document.querySelector("code");
+
+    if (!editor) return "";
+
+    return editor.innerText || editor.textContent || "";
+  }
+
+  async function readImageBase64() {
+    const image = document.querySelector('img[src^="data:image/"]');
+    if (!image) return null;
+
+    return image.src.split(";base64,")[1] || null;
+  }
+
+  const binaryExtensions = [
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".webp",
+    ".ico",
+    ".svg",
+    ".mp4",
+    ".mov",
+    ".mp3",
+    ".wav",
+    ".pdf",
+    ".zip",
+    ".ttf",
+    ".woff",
+    ".woff2",
+  ];
+
+  const imageExtensions = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico"];
+
+  function getExtension(filename) {
+    const index = filename.lastIndexOf(".");
+    return index === -1 ? "" : filename.slice(index).toLowerCase();
+  }
+
+  try {
+    await loadJSZip();
+
+    const zip = new JSZip();
+    const successful = [];
+    const failed = [];
+
+    await expandAllFolders();
+
+    const files = [
+      ...document.querySelectorAll("button[data-radix-collection-item]"),
+    ].filter(isFileButton);
+
+    console.log("Files found:", files.length);
+
+    if (!files.length) {
+      throw new Error("No files found. Open the left file tree first.");
+    }
+
+    for (let i = 0; i < files.length; i++) {
+      const button = files[i];
+      const fileName = getItemName(button);
+      const folderPath = getFolderPath(button);
+      const filePath = folderPath ? `${folderPath}/${fileName}` : fileName;
+      const extension = getExtension(fileName);
+
+      console.log(`[${i + 1}/${files.length}] Reading ${filePath}`);
+
+      button.scrollIntoView({ block: "center" });
+      button.click();
+
+      await sleep(3500);
+
+      if (binaryExtensions.includes(extension)) {
+        const base64 = await readImageBase64();
+
+        if (base64 && imageExtensions.includes(extension)) {
+          zip.file(filePath, base64, { base64: true });
+          successful.push(filePath);
+        } else {
+          zip.file(
+            `${filePath}.EXPORT_WARNING.txt`,
+            "Binary file preview was not available in the browser UI."
+          );
+          failed.push(filePath);
+        }
+      } else {
+        const text = readVisibleEditorText();
+
+        if (text.trim()) {
+          zip.file(filePath, text);
+          successful.push(filePath);
+        } else {
+          zip.file(
+            `${filePath}.EMPTY_OR_FAILED.txt`,
+            "Could not read this file from the visible editor."
+          );
+          failed.push(filePath);
+        }
+      }
+    }
+
+    zip.file(
+      "EXPORT_REPORT.txt",
+      [
+        "Rork Project Export Report",
+        `Date: ${new Date().toISOString()}`,
+        `Files found: ${files.length}`,
+        `Successful: ${successful.length}`,
+        `Failed: ${failed.length}`,
+        "",
+        "Successful files:",
+        successful.join("\n"),
+        "",
+        "Failed files:",
+        failed.join("\n"),
+      ].join("\n")
+    );
+
+    const blob = await zip.generateAsync({ type: "blob" });
+
+    const downloadLink = document.createElement("a");
+    downloadLink.href = URL.createObjectURL(blob);
+    downloadLink.download = "rork_project_export.zip";
+    document.body.appendChild(downloadLink);
+    downloadLink.click();
+    downloadLink.remove();
+
+    alert(
+      `Export complete.\nFiles: ${files.length}\nSuccessful: ${successful.length}\nFailed: ${failed.length}\n\nCheck EXPORT_REPORT.txt inside the ZIP.`
+    );
+  } catch (error) {
+    console.error("Export failed:", error);
+    alert("Export failed: " + error.message);
+  }
+})();
    ```
 
 6. Press **Enter**
